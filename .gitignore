@@ -1,0 +1,11 @@
+# Provide relevant file patterns for the .gitignore file of a Terraform project
+*.tfstate
+*.tfstate.backup
+*.tfvars
+.terraform/
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraform.lock.hcl
+.terraform.lock

@@ -1,0 +1,17 @@
+collector {
+  interface = "0.0.0.0"
+  port = 8080
+
+  streams {
+    good = ${good_stream}
+    bad = ${bad_stream}
+
+    sink {
+      googleProjectId = ${google_project_id}
+    }
+  }
+
+  paths {
+    "/ice/t" = "/com.snowplowanalytics.snowplow/tp2"
+  }
+}
