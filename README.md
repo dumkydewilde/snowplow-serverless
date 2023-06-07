@@ -1,4 +1,5 @@
-A serverless Snowplow pipeline on Google Cloud Platform (GCP).
+# Serverless Snowplow
+A serverless Snowplow pipeline on Google Cloud Platform (GCP) for ~€0.02/day.
 
 This repository is a Terraform template to run a fully serverless snowplow pipeline based on Google Cloud Run and BigQuery.
 This allows you to run Snowplow at a minimal cost, especially for smaller sites and blogs.
@@ -14,6 +15,11 @@ The pipeline uses the following components
 - Cloud Run Job for the BigQuery stream loader
 - Cloud Run Jobs for creating, mutating the BigQuery table as well as repeating failed inserts.
 
+## Cost
+I've been running this setup for blog with ~15.000 visitors/month for 2 cents a day. If still have your GCP credits, you should be good 
+for the next 30 years...
+
 ## To Do
 - Seperate service accounts for seperate services
 - Add schedules (Cloud Scheduler) and workflows
+- Add Iglu resolver from GCS bucket
