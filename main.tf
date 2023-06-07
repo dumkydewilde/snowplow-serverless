@@ -8,15 +8,25 @@ provider "google" {
 resource "google_project_service" "run_api" {
   service = "run.googleapis.com"
 }
+resource "google_project_service" "schedule_api" {
+  service = "cloudscheduler.googleapis.com"
+}
 
-# Set up service account
+# Set up service account and permissions
 resource "google_service_account" "cloud_run_sa" {
   account_id = "snowplow-ice-terra"
   display_name = "Snowplow Cloud Run Service Account"
 }
 
 resource "google_project_iam_member" "cloud_run_sa" {
-  for_each = toset(["roles/pubsub.publisher", "roles/pubsub.editor", "roles/run.serviceAgent"])
+  for_each = toset([
+    "roles/bigquery.dataEditor", 
+    "roles/bigquery.jobUser", 
+    "roles/pubsub.editor", 
+    "roles/run.serviceAgent",
+    "roles/logging.logWriter",
+    "roles/storage.objectViewer"
+    ])
   project = var.project_id
   role = each.value
   member = google_service_account.cloud_run_sa.member
@@ -25,8 +35,9 @@ resource "google_project_iam_member" "cloud_run_sa" {
 ### VARIABLES ###
 locals {
     # Configs
-    topic_names = ["raw-topic", "bad-1-topic", "enriched-topic", "bq-bad-rows-topic"]
+    topic_names = ["raw", "bad", "enriched", "bq-bad-rows", "loader-types", "failed-inserts"]
     config_iglu_resolver = base64encode(file("${path.module}/configs/iglu_resolver.json"))
+    job_timeout = "600s"
 
     # enrichments
     campaign_attribution     = file("${path.module}/configs/enricher/campaign_attribution.json")
@@ -44,29 +55,33 @@ locals {
     ]
 }
 
+### PIPELINE ###
+
 # 1. Deploy PubSub Topics & Subs
 resource "google_pubsub_topic" "topics" {
   for_each = toset(local.topic_names)
   
-  name = "${var.prefix}-${each.value}"
+  name = "${var.prefix}-${each.value}-topic"
   labels = var.labels
 }
 
 resource "google_pubsub_subscription" "subscriptions" {
   for_each = toset(local.topic_names)
   name  = "${var.prefix}-${each.value}-sub"
-  topic = "${var.prefix}-${each.value}"
+  topic =  google_pubsub_topic.topics[each.value].name
   expiration_policy {
     ttl = ""
   }
   labels = var.labels
+
+  depends_on = [ google_pubsub_topic.topics ]
 }
 
 # 2. Collector
 locals {
   config_collector = base64encode(templatefile("${path.module}/configs/collector/config.hocon.tmpl", {
-    stream_good = "${var.prefix}-raw-topic"
-    stream_bad = "${var.prefix}-bad-1-topic"
+    stream_good = google_pubsub_topic.topics["raw"].name
+    stream_bad =  google_pubsub_topic.topics["bad"].name
     google_project_id = var.project_id
   }))
 }
@@ -78,7 +93,6 @@ resource "google_cloud_run_v2_service" "collector_server" {
     ingress = "INGRESS_TRAFFIC_ALL"
 
     template {
-        revision = "${var.prefix}-collector-server-${formatdate("YYMMDDhhmmss", timestamp())}"
         service_account = google_service_account.cloud_run_sa.email
         scaling {
             max_instance_count = 1
@@ -98,12 +112,6 @@ resource "google_cloud_run_v2_service" "collector_server" {
         type = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
         percent = 100
     }
-    
-    lifecycle {
-      ignore_changes = [
-        template.0.revision
-      ]
-    }
 
     depends_on = [google_project_service.run_api]
 }
@@ -121,9 +129,9 @@ resource "google_cloud_run_service_iam_binding" "collector_server" {
 locals {
   config_enricher = base64encode(templatefile("${path.module}/configs/enricher/config.hocon.tmpl", {
     project_id = var.project_id
-    enricher_input = google_pubsub_subscription.subscriptions["raw-topic"].id
-    stream_enriched = "${var.prefix}-enriched-topic"
-    stream_bad = "${var.prefix}-bad-1-topic"
+    enricher_input = google_pubsub_subscription.subscriptions["raw"].id
+    stream_enriched =  google_pubsub_topic.topics["enriched"].name
+    stream_bad =  google_pubsub_topic.topics["bad"].name
   }))
 
   enrichments = base64encode(templatefile("${path.module}/configs/enricher/enrichments.json.tmpl", { enrichments = join(",", local.enrichments_list) }))
@@ -136,10 +144,10 @@ resource "google_cloud_run_v2_job" "enrichment_job" {
 
     template {
       template {
-        timeout = "600s"
+        timeout = local.job_timeout
         service_account = google_service_account.cloud_run_sa.email
         containers {
-            image = "snowplow/snowplow-enrich-pubsub:latest"
+            image = "snowplow/snowplow-enrich-pubsub:latest-distroless"
             args = [
               "--config=${local.config_enricher}",
               "--enrichments=${local.enrichments}",
@@ -161,13 +169,12 @@ resource "google_cloud_run_v2_job" "enrichment_job" {
         launch_stage,
       ]
     }
-
-    depends_on = [google_project_service.run_api]
 }
 
 
 
-# 5. Deploy BigQuery Loader
+# 4. Deploy BigQuery Loader
+
 
 resource "google_bigquery_dataset" "bigquery_db" {
   dataset_id = replace("${var.prefix}_snowplow", "-", "_")
@@ -178,12 +185,23 @@ resource "google_bigquery_dataset" "bigquery_db" {
 
 resource "google_storage_bucket" "bq_loader_dead_letter_bucket" {
   count = var.bigquery_loader_dead_letter_bucket_deploy ? 1 : 0
-
   name          = var.bigquery_loader_dead_letter_bucket_name
   location      = var.region
   force_destroy = true
+  labels        = var.labels
+}
 
-  labels = var.labels
+resource "google_storage_bucket_iam_binding" "dead_letter_storage_object_admin_binding" {
+  bucket = google_storage_bucket.bq_loader_dead_letter_bucket[0].name
+  role   = "roles/storage.objectAdmin"
+  members = [google_service_account.cloud_run_sa.member]
+}
+
+resource "google_bigquery_dataset_iam_member" "dataset_bigquery_data_editor_binding" {
+  project    = var.project_id
+  dataset_id = google_bigquery_dataset.bigquery_db.dataset_id
+  role       = "roles/bigquery.dataEditor"
+  member    = google_service_account.cloud_run_sa.member
 }
 
 locals {
@@ -191,32 +209,136 @@ locals {
     join("", google_storage_bucket.bq_loader_dead_letter_bucket.*.name),
     var.bigquery_loader_dead_letter_bucket_name,
   )
+
+  config_loader = base64encode(templatefile("${path.module}/configs/loader/config.hocon.tmpl", {
+    project_id = var.project_id
+    loader_input = google_pubsub_subscription.subscriptions["enriched"].name 
+    dataset_id = google_bigquery_dataset.bigquery_db.dataset_id
+    table_id = "${var.prefix}_events"
+    bad_topic =  google_pubsub_topic.topics["bad"].name
+    failed_inserts_topic =  google_pubsub_topic.topics["failed-inserts"].name
+    failed_inserts_sub = google_pubsub_subscription.subscriptions["failed-inserts"].name 
+    mutator_types_topic =  google_pubsub_topic.topics["loader-types"].name
+    mutator_types_sub = google_pubsub_subscription.subscriptions["loader-types"].name 
+    dead_letter_bucket = google_storage_bucket.bq_loader_dead_letter_bucket[0].url
+  }))
 }
 
-#module "bigquery_loader" {
-#  source  = "snowplow-devops/bigquery-loader-pubsub-ce/google"
-#  version = "0.1.0"
-#
-#  name = "${var.prefix}-bq-loader-server"
-#
-#  network    = var.network
-#  subnetwork = var.subnetwork
-#  region     = var.region
-#  project_id = var.project_id
-#
-#  ssh_ip_allowlist = var.ssh_ip_allowlist
-#  ssh_key_pairs    = var.ssh_key_pairs
-#
-#  input_topic_name            = module.enriched_topic.name
-#  bad_rows_topic_name         = join("", module.bad_rows_topic.*.name)
-#  gcs_dead_letter_bucket_name = local.bq_loader_dead_letter_bucket_name
-#  bigquery_dataset_id         = join("", google_bigquery_dataset.bigquery_db.*.dataset_id)
-#
-#  # Linking in the custom Iglu Server here
-#  custom_iglu_resolvers = local.custom_iglu_resolvers
-#
-#  telemetry_enabled = var.telemetry_enabled
-#  user_provided_id  = var.user_provided_id
-#
-#  labels = var.labels
-#}
+# Mutator 
+resource "google_cloud_run_v2_job" "mutator_create_job" {
+    name = "${var.prefix}-mutator-create-job"
+    location = var.region
+    project = var.project_id
+
+    template {
+      template {
+        timeout = local.job_timeout
+        service_account = google_service_account.cloud_run_sa.email
+        containers {
+            image = "snowplow/snowplow-bigquery-mutator:latest-distroless"
+            args = [
+              "create", 
+              "--config=${local.config_loader}",
+              "--resolver=${local.config_iglu_resolver}",
+              "--partitionColumn=load_tstamp"
+            ]   
+        }
+        max_retries = 1
+      }
+    }
+
+    lifecycle {
+      ignore_changes = [
+        launch_stage,
+      ]
+    }
+}
+
+resource "google_cloud_run_v2_job" "mutator_listen_job" {
+    name = "${var.prefix}-mutator-listen-job"
+    location = var.region
+    project = var.project_id
+
+    template {
+      template {
+        timeout = local.job_timeout
+        service_account = google_service_account.cloud_run_sa.email
+        containers {
+            image = "snowplow/snowplow-bigquery-mutator:latest-distroless"
+            args = [
+              "listen", 
+              "--config=${local.config_loader}",
+              "--resolver=${local.config_iglu_resolver}",
+            ]   
+        }
+        max_retries = 1
+      }
+    }
+
+    lifecycle {
+      ignore_changes = [
+        launch_stage,
+      ]
+    }
+}
+
+resource "google_cloud_run_v2_job" "streamloader" {
+    name = "${var.prefix}-streamloader-job"
+    location = var.region
+    project = var.project_id
+
+    template {
+      template {
+        timeout = local.job_timeout
+        service_account = google_service_account.cloud_run_sa.email
+        containers {
+            image = "snowplow/snowplow-bigquery-streamloader:latest"
+            args = [
+              "--config=${local.config_loader}",
+              "--resolver=${local.config_iglu_resolver}",
+            ]   
+        }
+        max_retries = 1
+      }
+    }
+
+    lifecycle {
+      ignore_changes = [
+        launch_stage,
+      ]
+    }
+
+    depends_on = [google_project_service.run_api]
+}
+
+resource "google_cloud_run_v2_job" "repeater" {
+    name = "${var.prefix}-repeater-job"
+    location = var.region
+    project = var.project_id
+
+    template {
+      template {
+        timeout = local.job_timeout
+        service_account = google_service_account.cloud_run_sa.email
+        containers {
+            image = "snowplow/snowplow-bigquery-repeater:latest-distroless"
+            args = [
+              "--config=${local.config_loader}",
+              "--resolver=${local.config_iglu_resolver}",
+              "--bufferSize=20",
+              "--timeout=20",
+              "--backoffPeriod=500"
+            ]   
+        }
+        max_retries = 1
+      }
+    }
+
+    lifecycle {
+      ignore_changes = [
+        launch_stage,
+      ]
+    }
+
+    depends_on = [google_project_service.run_api]
+}

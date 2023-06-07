@@ -1,0 +1,59 @@
+{
+  "projectId": "${project_id}"
+
+  "loader": {
+    "input": {
+      "subscription": "${loader_input}"
+    }
+
+    "output": {
+      "good": {
+        "datasetId": "${dataset_id}"
+        "tableId": "${table_id}"
+      }
+
+      "bad": {
+        "topic": "${bad_topic}"
+      }
+
+      "types": {
+        "topic": "${mutator_types_topic}"
+      }
+
+      "failedInserts": {
+        "topic": "${failed_inserts_topic}"
+      }
+    }
+  }
+
+  "mutator": {
+    "input": {
+      "subscription": "${mutator_types_sub}"
+    }
+
+    "output": {
+      "good": $${loader.output.good} # will be automatically inferred
+    }
+  }
+
+  "repeater": {
+    "input": {
+      "subscription": "${failed_inserts_sub}"
+    }
+
+    "output": {
+      "good": $${loader.output.good} # will be automatically inferred
+
+      "deadLetters": {
+        "bucket": "${dead_letter_bucket}"
+      }
+    }
+  }
+
+  "monitoring": {
+    "stdout": {
+      "period": "2 min"
+      "prefix": "snowplow.monitoring"
+    }
+  }
+}
