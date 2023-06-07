@@ -1,14 +1,14 @@
 # Will be prefixed to all resource names
-# Use this to easily identify the resources created and provide entropy for subsequent environments
 prefix = "icet"
-project_id = "ice-terraform"
+project_id = "my-project-id"
 region = "europe-north1"
 
 # Must be globally unique so will need to be updated before applying
-bigquery_loader_dead_letter_bucket_name = "sp-bq-loader-dead-letter"
-
-user_provided_id  = ""
-telemetry_enabled = true
+bigquery_loader_dead_letter_bucket_name = "unique-id-snowplow-bq-loader-dead-letter"
 
 # --- Extra Labels to append to created resources (optional)
-labels = {}
+labels = {
+    "environment": "prod",
+    "snowplow": "true",
+    "terraform": "true"
+}

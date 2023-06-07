@@ -1,0 +1,28 @@
+{
+  "input": {
+    "subscription": "${enricher_input}"
+  }
+
+  "output": {
+    "good": {
+      "topic": "projects/${project_id}/topics/${stream_enriched}"
+    }
+
+    "bad": {
+      "topic": "projects/${project_id}/topics/${stream_bad}"
+    }
+  }
+
+  "monitoring": {
+    "metrics": {
+      "hostname": "localhost"
+      "port": 8080
+      "prefix": "snowplow.enrich."
+      "period": "10 seconds",
+      "stdout": {
+        "period": "1 minute"
+        "prefix": "snowplow.enrich."
+      }
+    }
+  }
+}

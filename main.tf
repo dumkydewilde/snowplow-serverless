@@ -9,52 +9,67 @@ resource "google_project_service" "run_api" {
   service = "run.googleapis.com"
 }
 
-resource "google_project_service" "compute_api" {
-  service = "compute.googleapis.com"
-}
-
-# Set up service account with default GCE permissions
+# Set up service account
 resource "google_service_account" "cloud_run_sa" {
   account_id = "snowplow-ice-terra"
   display_name = "Snowplow Cloud Run Service Account"
 }
 
 resource "google_project_iam_member" "cloud_run_sa" {
-  for_each = toset(["roles/pubsub.publisher", "roles/pubsub.viewer"])
+  for_each = toset(["roles/pubsub.publisher", "roles/pubsub.editor", "roles/run.serviceAgent"])
   project = var.project_id
   role = each.value
   member = google_service_account.cloud_run_sa.member
 }
 
+### VARIABLES ###
 locals {
     # Configs
     topic_names = ["raw-topic", "bad-1-topic", "enriched-topic", "bq-bad-rows-topic"]
     config_iglu_resolver = base64encode(file("${path.module}/configs/iglu_resolver.json"))
-    config_collector = base64encode(templatefile("${path.module}/configs/collector/config.hocon.tmpl", {
-        stream_good = "${var.prefix}-raw-topic"
-        stream_bad = "${var.prefix}-bad-1-topic"
-        google_project_id = var.project_id
-    }))
 
     # enrichments
-    campaign_attribution     = jsonencode(file("${path.module}/configs/enrichments/campaign_attribution.json"))
-    anonymise_ip             = jsonencode(file("${path.module}/configs/enrichments/anon_ip.json"))
-    referer_parser           = jsonencode(file("${path.module}/configs/enrichments/referer_parser.json"))
-    javascript_enrichment    = jsonencode(templatefile("${path.module}/configs/enrichments/javascript_enrichment.json.tmpl", {
-                                    javascript_script = base64encode(file("${path.module}/configs/enrichments/javascript_enrichment_script.js"))
-                                }))
+    campaign_attribution     = file("${path.module}/configs/enricher/campaign_attribution.json")
+    anonymise_ip             = file("${path.module}/configs/enricher/anon_ip.json")
+    referer_parser           = file("${path.module}/configs/enricher/referer_parser.json")
+    javascript_enrichment    = templatefile("${path.module}/configs/enricher/javascript_enrichment.json.tmpl", {
+                                    javascript_script = base64encode(file("${path.module}/configs/enricher/javascript_enrichment_script.js"))
+                                })
 
-    enrichments = base64encode(local.campaign_attribution)
+    enrichments_list = [
+        local.campaign_attribution,
+        local.anonymise_ip,
+        local.referer_parser,
+        local.javascript_enrichment
+    ]
 }
 
-# 1. Deploy PubSub Topics
+# 1. Deploy PubSub Topics & Subs
 resource "google_pubsub_topic" "topics" {
   for_each = toset(local.topic_names)
   
   name = "${var.prefix}-${each.value}"
   labels = var.labels
 }
-# ---- Cloud Run service
+
+resource "google_pubsub_subscription" "subscriptions" {
+  for_each = toset(local.topic_names)
+  name  = "${var.prefix}-${each.value}-sub"
+  topic = "${var.prefix}-${each.value}"
+  expiration_policy {
+    ttl = ""
+  }
+  labels = var.labels
+}
+
+# 2. Collector
+locals {
+  config_collector = base64encode(templatefile("${path.module}/configs/collector/config.hocon.tmpl", {
+    stream_good = "${var.prefix}-raw-topic"
+    stream_bad = "${var.prefix}-bad-1-topic"
+    google_project_id = var.project_id
+  }))
+}
 resource "google_cloud_run_v2_service" "collector_server" {
     name = "${var.prefix}-collector-server"
     location = var.region
@@ -83,6 +98,12 @@ resource "google_cloud_run_v2_service" "collector_server" {
         type = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
         percent = 100
     }
+    
+    lifecycle {
+      ignore_changes = [
+        template.0.revision
+      ]
+    }
 
     depends_on = [google_project_service.run_api]
 }
@@ -97,10 +118,56 @@ resource "google_cloud_run_service_iam_binding" "collector_server" {
 }
 
 # 3. Deploy Enrichment
+locals {
+  config_enricher = base64encode(templatefile("${path.module}/configs/enricher/config.hocon.tmpl", {
+    project_id = var.project_id
+    enricher_input = google_pubsub_subscription.subscriptions["raw-topic"].id
+    stream_enriched = "${var.prefix}-enriched-topic"
+    stream_bad = "${var.prefix}-bad-1-topic"
+  }))
+
+  enrichments = base64encode(templatefile("${path.module}/configs/enricher/enrichments.json.tmpl", { enrichments = join(",", local.enrichments_list) }))
+}
+
+resource "google_cloud_run_v2_job" "enrichment_job" {
+    name = "${var.prefix}-enrichment-job"
+    location = var.region
+    project = var.project_id
+
+    template {
+      template {
+        timeout = "600s"
+        service_account = google_service_account.cloud_run_sa.email
+        containers {
+            image = "snowplow/snowplow-enrich-pubsub:latest"
+            args = [
+              "--config=${local.config_enricher}",
+              "--enrichments=${local.enrichments}",
+              "--iglu-config=${local.config_iglu_resolver}",
+            ]   
+            resources {
+              limits = {
+                cpu = "2"
+                memory = "1Gi"
+              }
+            }
+        }
+        max_retries = 1
+      }
+    }
+
+    lifecycle {
+      ignore_changes = [
+        launch_stage,
+      ]
+    }
+
+    depends_on = [google_project_service.run_api]
+}
+
 
 
 # 5. Deploy BigQuery Loader
-
 
 resource "google_bigquery_dataset" "bigquery_db" {
   dataset_id = replace("${var.prefix}_snowplow", "-", "_")
