@@ -1,28 +1,38 @@
+### SETUP ###
 provider "google" {
   project = var.project_id
   region  = var.region
 }
 
+# Enable APIs
+resource "google_project_service" "run_api" {
+  service = "run.googleapis.com"
+}
+
+resource "google_project_service" "compute_api" {
+  service = "compute.googleapis.com"
+}
+
+# Set up service account with default GCE permissions
 resource "google_service_account" "cloud_run_sa" {
-  account_id = "cloud-run-sa"
+  account_id = "snowplow-ice-terra"
+  display_name = "Snowplow Cloud Run Service Account"
+}
+
+resource "google_project_iam_member" "cloud_run_sa" {
+  for_each = toset(["roles/pubsub.publisher", "roles/pubsub.viewer"])
+  project = var.project_id
+  role = each.value
+  member = google_service_account.cloud_run_sa.member
 }
 
 locals {
-  custom_iglu_resolvers = [
-    {
-      name            = "Iglu Server"
-      priority        = 0
-      uri             = "${var.iglu_server_dns_name}/api"
-      api_key         = var.iglu_super_api_key
-      vendor_prefixes = []
-    }
-  ]
-
     # Configs
+    topic_names = ["raw-topic", "bad-1-topic", "enriched-topic", "bq-bad-rows-topic"]
     config_iglu_resolver = base64encode(file("${path.module}/configs/iglu_resolver.json"))
     config_collector = base64encode(templatefile("${path.module}/configs/collector/config.hocon.tmpl", {
-        stream_good = "${var.prefix}-good-topic"
-        stream_bad = "${var.prefix}-raw-topic"
+        stream_good = "${var.prefix}-raw-topic"
+        stream_bad = "${var.prefix}-bad-1-topic"
         google_project_id = var.project_id
     }))
 
@@ -31,66 +41,19 @@ locals {
     anonymise_ip             = jsonencode(file("${path.module}/configs/enrichments/anon_ip.json"))
     referer_parser           = jsonencode(file("${path.module}/configs/enrichments/referer_parser.json"))
     javascript_enrichment    = jsonencode(templatefile("${path.module}/configs/enrichments/javascript_enrichment.json.tmpl", {
-                                    javascript_script = base64encode(file("${path.module}/enrichments/javascript_enrichment_script.js"))
+                                    javascript_script = base64encode(file("${path.module}/configs/enrichments/javascript_enrichment_script.js"))
                                 }))
 
-    enrichments = base64encode(campaign_attribution)
+    enrichments = base64encode(local.campaign_attribution)
 }
 
 # 1. Deploy PubSub Topics
-module "raw_topic" {
-  source  = "snowplow-devops/pubsub-topic/google"
-  version = "0.1.0"
-
-  name = "${var.prefix}-raw-topic"
-
+resource "google_pubsub_topic" "topics" {
+  for_each = toset(local.topic_names)
+  
+  name = "${var.prefix}-${each.value}"
   labels = var.labels
 }
-
-module "bad_1_topic" {
-  source  = "snowplow-devops/pubsub-topic/google"
-  version = "0.1.0"
-
-  name = "${var.prefix}-bad-1-topic"
-
-  labels = var.labels
-}
-
-module "enriched_topic" {
-  source  = "snowplow-devops/pubsub-topic/google"
-  version = "0.1.0"
-
-  name = "${var.prefix}-enriched-topic"
-
-  labels = var.labels
-}
-
-# 2. Deploy Collector stack
-#module "collector_pubsub" {
-#  source  = "snowplow-devops/collector-pubsub-ce/google"
-#  version = "0.2.2"
-#
-#  name = "${var.prefix}-collector-server"
-#
-#  network    = var.network
-#  subnetwork = var.subnetwork
-#  region     = var.region
-#
-#  ssh_ip_allowlist = var.ssh_ip_allowlist
-#  ssh_key_pairs    = var.ssh_key_pairs
-#
-#  topic_project_id = var.project_id
-#  good_topic_name  = module.raw_topic.name
-#  bad_topic_name   = module.bad_1_topic.name
-#
-#  telemetry_enabled = var.telemetry_enabled
-#  user_provided_id  = var.user_provided_id
-#
-#  associate_public_ip_address = false
-#
-#  labels = var.labels
-#}
-
 # ---- Cloud Run service
 resource "google_cloud_run_v2_service" "collector_server" {
     name = "${var.prefix}-collector-server"
@@ -100,71 +63,47 @@ resource "google_cloud_run_v2_service" "collector_server" {
     ingress = "INGRESS_TRAFFIC_ALL"
 
     template {
-        service_account_name = google_service_account.cloud_run_sa.email
-
+        revision = "${var.prefix}-collector-server-${formatdate("YYMMDDhhmmss", timestamp())}"
+        service_account = google_service_account.cloud_run_sa.email
         scaling {
-            max_instance_count = 2
+            max_instance_count = 1
         }
-        
         containers {
+            name = "${var.prefix}-collector-server"
             image = "snowplow/scala-stream-collector-pubsub:latest"
-            args = [
-                "--config", "${local.config_collector}",
-                "--iglu-config", "${local.config_iglu_resolver}",
-                "--enrichments", "${local.enrichments}"
-            ]
+            command = [
+                "/bin/sh",
+                "-c",
+                "echo '${local.config_collector}' | base64 -d > config.hocon && /home/snowplow/bin/snowplow-stream-collector --config=config.hocon"
+            ]   
         }
-        
     }
 
     traffic {
         type = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
         percent = 100
     }
+
+    depends_on = [google_project_service.run_api]
+}
+
+resource "google_cloud_run_service_iam_binding" "collector_server" {
+  location = google_cloud_run_v2_service.collector_server.location
+  service  = google_cloud_run_v2_service.collector_server.name
+  role     = "roles/run.invoker"
+  members = [
+    "allUsers"
+  ]
 }
 
 # 3. Deploy Enrichment
-module "enrich_pubsub" {
-  source  = "snowplow-devops/enrich-pubsub-ce/google"
-  version = "0.1.2"
-
-  name = "${var.prefix}-enrich-server"
-
-  network    = var.network
-  subnetwork = var.subnetwork
-  region     = var.region
-
-  ssh_ip_allowlist = var.ssh_ip_allowlist
-  ssh_key_pairs    = var.ssh_key_pairs
-
-  raw_topic_name = module.raw_topic.name
-  good_topic_id  = module.enriched_topic.id
-  bad_topic_id   = module.bad_1_topic.id
-
-  # Linking in the custom Iglu Server here
-  custom_iglu_resolvers = local.custom_iglu_resolvers
-
-  telemetry_enabled = var.telemetry_enabled
-  user_provided_id  = var.user_provided_id
-
-  associate_public_ip_address = false
-
-  labels = var.labels
-}
 
 
 # 5. Deploy BigQuery Loader
-module "bad_rows_topic" {
-  source  = "snowplow-devops/pubsub-topic/google"
-  version = "0.1.0"
 
-  name = "${var.prefix}-bq-bad-rows-topic"
-
-  labels = var.labels
-}
 
 resource "google_bigquery_dataset" "bigquery_db" {
-  dataset_id = replace("${var.prefix}_snowplow_db", "-", "_")
+  dataset_id = replace("${var.prefix}_snowplow", "-", "_")
   location   = var.region
 
   labels = var.labels
@@ -187,30 +126,30 @@ locals {
   )
 }
 
-module "bigquery_loader" {
-  source  = "snowplow-devops/bigquery-loader-pubsub-ce/google"
-  version = "0.1.0"
-
-  name = "${var.prefix}-bq-loader-server"
-
-  network    = var.network
-  subnetwork = var.subnetwork
-  region     = var.region
-  project_id = var.project_id
-
-  ssh_ip_allowlist = var.ssh_ip_allowlist
-  ssh_key_pairs    = var.ssh_key_pairs
-
-  input_topic_name            = module.enriched_topic.name
-  bad_rows_topic_name         = join("", module.bad_rows_topic.*.name)
-  gcs_dead_letter_bucket_name = local.bq_loader_dead_letter_bucket_name
-  bigquery_dataset_id         = join("", google_bigquery_dataset.bigquery_db.*.dataset_id)
-
-  # Linking in the custom Iglu Server here
-  custom_iglu_resolvers = local.custom_iglu_resolvers
-
-  telemetry_enabled = var.telemetry_enabled
-  user_provided_id  = var.user_provided_id
-
-  labels = var.labels
-}
+#module "bigquery_loader" {
+#  source  = "snowplow-devops/bigquery-loader-pubsub-ce/google"
+#  version = "0.1.0"
+#
+#  name = "${var.prefix}-bq-loader-server"
+#
+#  network    = var.network
+#  subnetwork = var.subnetwork
+#  region     = var.region
+#  project_id = var.project_id
+#
+#  ssh_ip_allowlist = var.ssh_ip_allowlist
+#  ssh_key_pairs    = var.ssh_key_pairs
+#
+#  input_topic_name            = module.enriched_topic.name
+#  bad_rows_topic_name         = join("", module.bad_rows_topic.*.name)
+#  gcs_dead_letter_bucket_name = local.bq_loader_dead_letter_bucket_name
+#  bigquery_dataset_id         = join("", google_bigquery_dataset.bigquery_db.*.dataset_id)
+#
+#  # Linking in the custom Iglu Server here
+#  custom_iglu_resolvers = local.custom_iglu_resolvers
+#
+#  telemetry_enabled = var.telemetry_enabled
+#  user_provided_id  = var.user_provided_id
+#
+#  labels = var.labels
+#}
