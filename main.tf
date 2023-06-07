@@ -24,6 +24,7 @@ resource "google_project_iam_member" "cloud_run_sa" {
     "roles/bigquery.jobUser", 
     "roles/pubsub.editor", 
     "roles/run.serviceAgent",
+    "roles/run.invoker",
     "roles/logging.logWriter",
     "roles/storage.objectViewer"
     ])
@@ -341,4 +342,28 @@ resource "google_cloud_run_v2_job" "repeater" {
     }
 
     depends_on = [google_project_service.run_api]
+}
+
+
+resource "google_cloud_scheduler_job" "jobs_scheduler" {
+  for_each = toset([ "repeater-job", "streamloader-job", "mutator-listen-job", "enrichment-job" ])
+  region           = "europe-west1"
+  name             = "${var.prefix}-${each.value}-scheduler"
+  description      = "Trigger for ${each.value}"
+  schedule         = "23 8-21/3 * * *"
+  time_zone        = "Europe/Amsterdam"
+  attempt_deadline = "320s"
+
+  retry_config {
+    retry_count = 1
+  }
+
+  http_target {
+    http_method = "POST"
+    uri         = "https://${var.region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${var.project_id}/jobs/${var.prefix}-${each.value}:run"
+    oauth_token {
+      service_account_email = google_service_account.cloud_run_sa.email
+      scope = "https://www.googleapis.com/auth/cloud-platform"
+    }
+  }
 }

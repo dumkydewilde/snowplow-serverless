@@ -17,9 +17,9 @@ The pipeline uses the following components
 
 ## Cost
 I've been running this setup for blog with ~15.000 visitors/month for 2 cents a day. If still have your GCP credits, you should be good 
-for the next 30 years...
+for the next 30 years or so...
 
 ## To Do
 - Seperate service accounts for seperate services
-- Add schedules (Cloud Scheduler) and workflows
+- Add workflows in combination with schedule
 - Add Iglu resolver from GCS bucket
