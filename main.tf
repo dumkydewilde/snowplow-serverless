@@ -37,7 +37,6 @@ resource "google_project_iam_member" "cloud_run_sa" {
 locals {
     # Configs
     topic_names = ["raw", "bad", "enriched", "bq-bad-rows", "loader-types", "failed-inserts"]
-    config_iglu_resolver = base64encode(file("${path.module}/configs/iglu_resolver.json"))
     job_timeout = "600s"
 
     # enrichments
@@ -55,6 +54,37 @@ locals {
         local.javascript_enrichment
     ]
 }
+
+### IGLU SCHEMAS ###
+resource "random_string" "six_chars" {
+  length  = 6
+  special = false
+  upper   = false
+}
+
+resource "google_storage_bucket" "iglu_resolver_bucket" {
+  name = "${var.prefix}-iglu-schemas-${random_string.six_chars.result}"
+  location = var.region
+  project = var.project_id
+  uniform_bucket_level_access = true
+  force_destroy = true
+}
+
+resource "google_storage_bucket_iam_member" "member" {
+  bucket = google_storage_bucket.iglu_resolver_bucket.name
+  role   = "roles/storage.objectViewer"
+  member = "allUsers"
+}
+
+locals {
+  config_iglu_resolver = base64encode(templatefile("${path.module}/configs/iglu_resolver.json.tmpl", {
+    VENDOR      = var.vendor
+    BUCKET_NAME = google_storage_bucket.iglu_resolver_bucket.name
+    BUCKET_PATH = ""
+    })
+  )
+}
+
 
 ### PIPELINE ###
 

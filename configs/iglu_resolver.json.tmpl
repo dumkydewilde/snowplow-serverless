@@ -22,6 +22,16 @@
               "uri": "http://mirror01.iglucentral.com"
             }
           }
+        },
+        {
+          "name": "Snowplow Serverless - Custom Iglu Schemas",
+          "priority": 2,
+          "vendorPrefixes": [ "${VENDOR}" ],
+          "connection": {
+            "http": {
+              "uri": "http://storage.googleapis.com/${BUCKET_NAME}/${BUCKET_PATH}"
+            }
+          }
         }
       ]
     }

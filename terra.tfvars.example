@@ -2,6 +2,7 @@
 prefix = "icet"
 project_id = "my-project-id"
 region = "europe-north1"
+vendor = "custom.schema.vendor"
 
 # Must be globally unique so will need to be updated before applying
 bigquery_loader_dead_letter_bucket_name = "unique-id-snowplow-bq-loader-dead-letter"
