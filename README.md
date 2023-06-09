@@ -31,3 +31,4 @@ for the next 30 years or so... In any case you always want to
 - Add workflows in combination with schedule
 - Gracefully shut down Cloud Run Jobs when everything is processed instead of letting them fail on timeout
 - Create seperate storage bucket with enrichments to mount to enricher Cloud Run Job
+- Add Cloud Run Job to run Snowplow dbt packages
