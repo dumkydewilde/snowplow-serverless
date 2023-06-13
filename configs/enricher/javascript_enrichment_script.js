@@ -1,3 +1,5 @@
+// The following is an example of how you can use the JavaScript Enrichment to process your event in flight for example to check against bots and crawlers
+
 function urlParamsToObject(urlParams) {
   let result = {};
   urlParams.split("&").forEach(function(part) {
