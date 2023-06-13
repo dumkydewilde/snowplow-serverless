@@ -12,7 +12,7 @@ The pipeline uses the following components
 - Cloud Run Service for collecting hits 
 - Pub/Sub for communication between components
 - Cloud Run Job for enrichment
-- Google Cloud Storage bucket for storing custom schemas
+- Google Cloud Storage bucket for storing custom schemas (everything in the schemas/ folder is automatically uploaded to this bucket)
 - Cloud Run Job for the BigQuery stream loader
 - Cloud Run Jobs for creating, mutating the BigQuery table as well as repeating failed inserts.
 
