@@ -35,9 +35,7 @@ resource "google_project_iam_member" "cloud_run_sa" {
 
 ### VARIABLES ###
 locals {
-    # Configs
-    topic_names = ["raw", "bad", "enriched", "bq-bad-rows", "loader-types", "failed-inserts"]
-    job_timeout = "600s"
+    job_timeout = "300s"
 
     # enrichments
     campaign_attribution     = file("${path.module}/configs/enricher/campaign_attribution.json")
@@ -89,6 +87,10 @@ locals {
 ### PIPELINE ###
 
 # 1. Deploy PubSub Topics & Subs
+locals {
+    # Configs
+    topic_names = ["raw", "bad", "enriched", "bq-bad-rows", "loader-types", "failed-inserts"]
+}
 resource "google_pubsub_topic" "topics" {
   for_each = toset(local.topic_names)
   
