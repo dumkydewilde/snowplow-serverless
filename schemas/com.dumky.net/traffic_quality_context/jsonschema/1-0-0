@@ -1,0 +1,30 @@
+{
+  "$schema": "http://iglucentral.com/schemas/com.snowplowanalytics.self-desc/schema/jsonschema/1-0-0#",
+  "description" : "",
+  "self": {
+    "vendor": "com.dumky.net",
+    "name": "traffic_quality_context",
+    "format": "jsonschema",
+    "version": "1-0-0"
+  },
+  "type": "object",
+  "properties": {
+    "known_crawler": {
+      "type": "boolean",
+      "description": "Does the user agent belong to a known crawler (search engines, social platforms, etc.) based on a crawler list?"
+    },
+    "known_bot": {
+        "type": "boolean",
+        "description": "Does the user agent belong to a known bot (crawlers, scraping libraries, headless browsers, etc.)?"
+      },
+    "known_cloudprovider_ip": {
+        "type": ["boolean", "null"],
+        "description": "Does the user agent belong to known IP ranges from cloud providers (AWS, GCP, Azure)?"
+    },
+    "low_quality_referrer": {
+        "type": ["boolean", "null"],
+        "description": "Does the referrer host appear in a referrer spam list, is it localhost or a direct IP address?"
+    }
+  },
+  "additionalProperties": false
+}

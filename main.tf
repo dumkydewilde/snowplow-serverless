@@ -68,10 +68,19 @@ resource "google_storage_bucket" "iglu_resolver_bucket" {
   force_destroy = true
 }
 
+# Make the bucket public
 resource "google_storage_bucket_iam_member" "member" {
   bucket = google_storage_bucket.iglu_resolver_bucket.name
   role   = "roles/storage.objectViewer"
   member = "allUsers"
+}
+
+resource "google_storage_bucket_object" "schemas" {
+  for_each      = fileset("${path.module}/schemas/", "**")
+  source        = "${path.module}/schemas/${each.value}"
+  name          = "schemas/${each.value}"
+  content_type  = "text/plain"
+  bucket        = google_storage_bucket.iglu_resolver_bucket.id
 }
 
 locals {
