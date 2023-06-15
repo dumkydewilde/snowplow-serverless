@@ -387,7 +387,7 @@ resource "google_cloud_run_v2_job" "repeater" {
 
 # dbt Job
 locals {
-  dbt_profiles = base64encode(file("${path.module}/dbt/profiles.yml"))
+  dbt_run_script = base64encode(file("${path.module}/configs/dbt/run-dbt.sh"))
 }
 resource "google_cloud_run_v2_job" "dbt_job" {
     name = "${var.prefix}-dbt-transform-job"
@@ -399,7 +399,9 @@ resource "google_cloud_run_v2_job" "dbt_job" {
         timeout = local.job_timeout
         service_account = google_service_account.cloud_run_sa.email
         containers {
-            image = "python:3.11-slim"
+            # unfortunately GCP doesn't allow use to pull the dbt image from ghcr.io directly
+            # So we use a base python image and just install dbt-bigquery on it 
+            image = "python:3.11"
             env {
               name = "BQ_DATASET"
               value = "${google_bigquery_dataset.bigquery_db.dataset_id}"
@@ -415,11 +417,7 @@ resource "google_cloud_run_v2_job" "dbt_job" {
             command = [
                 "/bin/sh",
                 "-c",
-                "~/.dbt/"
-                "echo '${local.dbt_profiles}' | base64 -d > ~/.dbt/profiles.yml",
-                "pip install dbt-bigquery",
-                "dbt debug",
-                "dbt run --selector snowplow_web"
+                "echo ${local.dbt_run_script} | base64 -d > run-dbt.sh && /bin/sh run-dbt.sh"
             ]      
         }
         max_retries = 1
