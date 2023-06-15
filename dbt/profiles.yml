@@ -1,0 +1,13 @@
+default:
+  outputs:
+    prod:
+      dataset: '{{ env_var("BQ_DATASET") }}'
+      job_execution_timeout_seconds: 300
+      job_retries: 1
+      location: '{{ env_var("BQ_LOCATION") }}'
+      method: oauth
+      priority: interactive
+      project: '{{ env_var("GOOGLE_PROJECT_ID") }}'
+      threads: 16
+      type: bigquery
+  target: prod

@@ -256,7 +256,7 @@ locals {
     project_id = var.project_id
     loader_input = google_pubsub_subscription.subscriptions["enriched"].name 
     dataset_id = google_bigquery_dataset.bigquery_db.dataset_id
-    table_id = "${var.prefix}_events"
+    table_id = "events"
     bad_topic =  google_pubsub_topic.topics["bad"].name
     failed_inserts_topic =  google_pubsub_topic.topics["failed-inserts"].name
     failed_inserts_sub = google_pubsub_subscription.subscriptions["failed-inserts"].name 
@@ -282,7 +282,7 @@ resource "google_cloud_run_v2_job" "mutator_create_job" {
               "create", 
               "--config=${local.config_loader}",
               "--resolver=${local.config_iglu_resolver}",
-              "--partitionColumn=load_tstamp"
+              "--partitionColumn=collector_tstamp"
             ]   
         }
         max_retries = 1
@@ -385,13 +385,61 @@ resource "google_cloud_run_v2_job" "repeater" {
     depends_on = [google_project_service.run_api]
 }
 
+# dbt Job
+locals {
+  dbt_profiles = base64encode(file("${path.module}/dbt/profiles.yml"))
+}
+resource "google_cloud_run_v2_job" "dbt_job" {
+    name = "${var.prefix}-dbt-transform-job"
+    location = var.region
+    project = var.project_id
+
+    template {
+      template {
+        timeout = local.job_timeout
+        service_account = google_service_account.cloud_run_sa.email
+        containers {
+            image = "python:3.11-slim"
+            env {
+              name = "BQ_DATASET"
+              value = "${google_bigquery_dataset.bigquery_db.dataset_id}"
+            }
+            env {
+              name = "BQ_LOCATION"
+              value = "${var.region}"
+            }
+            env {
+              name = "GOOGLE_PROJECT_ID"
+              value = "${var.project_id}"
+            }
+            command = [
+                "/bin/sh",
+                "-c",
+                "~/.dbt/"
+                "echo '${local.dbt_profiles}' | base64 -d > ~/.dbt/profiles.yml",
+                "pip install dbt-bigquery",
+                "dbt debug",
+                "dbt run --selector snowplow_web"
+            ]      
+        }
+        max_retries = 1
+      }
+    }
+
+    lifecycle {
+      ignore_changes = [
+        launch_stage,
+      ]
+    }
+}
+
 
 resource "google_cloud_scheduler_job" "jobs_scheduler" {
   for_each = toset([ "repeater-job", "streamloader-job", "mutator-listen-job", "enrichment-job" ])
   region           = "europe-west1"
   name             = "${var.prefix}-${each.value}-scheduler"
   description      = "Trigger for ${each.value}"
-  schedule         = "23 8-21/3 * * *"
+  schedule         = "23 8-21/5 * * *"
   time_zone        = "Europe/Amsterdam"
   attempt_deadline = "320s"
 

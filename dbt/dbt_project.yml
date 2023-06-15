@@ -1,0 +1,42 @@
+
+# Name your project! Project names should contain only lowercase characters
+# and underscores. A good package name should reflect your organization's
+# name or the intended use of these models
+name: 'ice_terra'
+config-version: 2
+
+# This setting configures which "profile" dbt uses for this project.
+profile: 'default'
+
+# These configurations specify where dbt should look for different types of files.
+# The `model-paths` config, for example, states that models in this project can be
+# found in the "models/" directory. You probably won't need to change these!
+model-paths: ["models"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:         # directories to be removed by `dbt clean`
+  - "target"
+  - "dbt_packages"
+
+vars:
+  snowplow_web:
+    app_id: ["dumky-dot-net"]
+    snowplow__database: "ice-terra"
+    snowplow__atomic_schema: "icet_snowplow"
+    snowplow__events: "{{ source('icet_snowplow', 'icet_events') }}"
+    snowplow__start_date: "2023-06-01"
+    snowplow__enable_yauaa: true
+    snowplow__enable_ua_parser: true
+    snowplow__upsert_lookback_days: 30
+    snowplow__backfill_limit_days: 90
+    snowplow__derived_tstamp_partitioned: false
+
+models:
+  ice_terra:
+
+dispatch:
+  - macro_namespace: dbt
+    search_order: ['snowplow_utils', 'dbt']
