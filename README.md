@@ -15,6 +15,8 @@ The pipeline uses the following components
 - Google Cloud Storage bucket for storing custom schemas (everything in the schemas/ folder is automatically uploaded to this bucket)
 - Cloud Run Job for the BigQuery stream loader
 - Cloud Run Jobs for creating, mutating the BigQuery table as well as repeating failed inserts.
+- Cloud Run Job to run the Snowplow dbt packages. This currently fetches the dbt project inside this folder, but you can also supply 
+it with your own dbt repo. 
 
 The collector is serverless so it will scale to zero if there is no traffic. However if you do have continuous traffic, 
 this might not be the best option for you as serverless instances work best for intermittent loads. The rest of the pipeline
@@ -22,8 +24,8 @@ runs on a schedule where it will process and load everything every three hours b
 real-time data anyway, right?
 
 ## Cost
-I've been running this setup for blog with ~15.000 visitors/month for 2 cents a day. If still have your GCP credits, you should be good 
-for the next 30 years or so... In any case you always want to 
+I've been running this setup for blog with ~15.000 visitors/month for 2 cents a day. If you still have your GCP credits, you should be good 
+for the next 30 years or so... In any case you always want to set up cost controls and keep an eye on your spending. Don't say I didn't warn you.
 
 ## To Do
 - Seperate service accounts for seperate services
@@ -31,4 +33,3 @@ for the next 30 years or so... In any case you always want to
 - Add workflows in combination with schedule
 - Gracefully shut down Cloud Run Jobs when everything is processed instead of letting them fail on timeout
 - Create seperate storage bucket with enrichments to mount to enricher Cloud Run Job
-- Add Cloud Run Job to run Snowplow dbt packages

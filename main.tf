@@ -36,6 +36,8 @@ resource "google_project_iam_member" "cloud_run_sa" {
 ### VARIABLES ###
 locals {
     job_timeout = "300s"
+    dbt_repo_url = "https://github.com/dumkydewilde/snowplow-serverless.git"
+    dbt_repo_folder_name = "snowplow-serverless/dbt"
 
     # enrichments
     campaign_attribution     = file("${path.module}/configs/enricher/campaign_attribution.json")
@@ -417,7 +419,7 @@ resource "google_cloud_run_v2_job" "dbt_job" {
             command = [
                 "/bin/sh",
                 "-c",
-                "echo ${local.dbt_run_script} | base64 -d > run-dbt.sh && /bin/sh run-dbt.sh"
+                "echo ${local.dbt_run_script} | base64 -d > run-dbt.sh && /bin/sh run-dbt.sh '${local.dbt_repo_url}' '${local.dbt_repo_folder_name}'"
             ]      
         }
         max_retries = 1
@@ -433,7 +435,7 @@ resource "google_cloud_run_v2_job" "dbt_job" {
 
 
 resource "google_cloud_scheduler_job" "jobs_scheduler" {
-  for_each = toset([ "repeater-job", "streamloader-job", "mutator-listen-job", "enrichment-job" ])
+  for_each = toset([ "repeater-job", "streamloader-job", "mutator-listen-job", "enrichment-job","dbt-transform-job"])
   region           = "europe-west1"
   name             = "${var.prefix}-${each.value}-scheduler"
   description      = "Trigger for ${each.value}"

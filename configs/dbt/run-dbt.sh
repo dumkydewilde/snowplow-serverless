@@ -1,6 +1,6 @@
 #!/bin/bash
-git clone -b dbt-job https://github.com/dumkydewilde/snowplow-serverless.git
-cd snowplow-serverless/dbt
+git clone -b dbt-job "$1"
+cd "$2"
 pip install dbt-bigquery
 dbt debug
 dbt deps
