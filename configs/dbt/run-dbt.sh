@@ -1,5 +1,5 @@
 #!/bin/bash
-git clone -b dbt-job "$1"
+git clone "$1"
 cd "$2"
 pip install dbt-bigquery
 dbt debug
