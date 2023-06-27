@@ -4,6 +4,8 @@ project_id = "my-project-id"
 region = "europe-north1"
 vendor = "custom.schema.vendor"
 
+dbt_snowplow__start_date = "2023-06-01"
+
 # Must be globally unique so will need to be updated before applying
 bigquery_loader_dead_letter_bucket_name = "unique-id-snowplow-bq-loader-dead-letter"
 
