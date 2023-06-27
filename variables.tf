@@ -35,3 +35,9 @@ variable "labels" {
   default     = {}
   type        = map(string)
 }
+
+variable "dbt_snowplow__start_date" {
+  description = "The labels to append to the resources in this module"
+  default     = "2023-06-01"
+  type        = string
+}

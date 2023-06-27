@@ -390,7 +390,11 @@ resource "google_cloud_run_v2_job" "repeater" {
 # dbt Job
 locals {
   dbt_run_script = base64encode(file("${path.module}/configs/dbt/run-dbt.sh"))
+  dbt_start_date = "${var.dbt_snowplow__start_date}"
+  dbt_snowplow__database = "${var.project_id}"
+  dbt_snowplow__atomic_schema = "${google_bigquery_dataset.bigquery_db.dataset_id}"
 }
+
 resource "google_cloud_run_v2_job" "dbt_job" {
     name = "${var.prefix}-dbt-transform-job"
     location = var.region
@@ -419,7 +423,7 @@ resource "google_cloud_run_v2_job" "dbt_job" {
             command = [
                 "/bin/sh",
                 "-c",
-                "echo ${local.dbt_run_script} | base64 -d > run-dbt.sh && /bin/sh run-dbt.sh '${local.dbt_repo_url}' '${local.dbt_repo_folder_name}'"
+                "echo ${local.dbt_run_script} | base64 -d > run-dbt.sh && /bin/sh run-dbt.sh '${local.dbt_repo_url}' '${local.dbt_repo_folder_name}' '${local.dbt_snowplow__database}' '${local.dbt_snowplow__atomic_schema}' '${local.dbt_start_date}'"
             ]      
         }
         max_retries = 1
