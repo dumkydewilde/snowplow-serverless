@@ -24,7 +24,7 @@ clean-targets:         # directories to be removed by `dbt clean`
 vars:
   snowplow_web:
     snowplow__start_date: "2023-06-01"
-    snowplow__enable_yauaa: false
+    snowplow__enable_yauaa: true
     snowplow__enable_ua_parser: true
     snowplow__upsert_lookback_days: 30
     snowplow__backfill_limit_days: 90
