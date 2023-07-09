@@ -46,12 +46,15 @@ locals {
     javascript_enrichment    = templatefile("${path.module}/configs/enricher/javascript_enrichment.json.tmpl", {
                                     javascript_script = base64encode(file("${path.module}/configs/enricher/javascript_enrichment_script.js"))
                                 })
+    
+    yauaa_enrichment         = file("${path.module}/configs/enricher/yauaa_enrichment.json")                  
 
     enrichments_list = [
         local.campaign_attribution,
         local.anonymise_ip,
         local.referer_parser,
-        local.javascript_enrichment
+        local.javascript_enrichment,
+        local.yauaa_enrichment
     ]
 }
 
