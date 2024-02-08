@@ -27,6 +27,9 @@ real-time data anyway, right?
 I've been running this setup for blog with ~15.000 visitors/month for 2 cents a day. If you still have your GCP credits, you should be good 
 for the next 30 years or so... In any case you always want to set up cost controls and keep an eye on your spending. Don't say I didn't warn you.
 
+## License
+With the license changes of Jan. 8 2024 the collector and enricher need an additional configuration setting to agree to [the new licenses](https://docs.snowplow.io/docs/contributing/copyright-license/). Since this type of set up (personal, serverless) is not high-availability you should be ok to use it. Of course the licensing changes do mean that you can not use any of the new versions of these components in a production/high-availability setting. Optionally you can use the [OpenSnowCat fork](https://github.com/opensnowcat/) or use a stand alone component like [buz.dev](buz.dev).
+
 ## To Do
 - Seperate service accounts for seperate services
 - Automate table creation on initial run
